@@ -13,8 +13,6 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.messaging.PluginMessageListener;
 import org.bukkit.scheduler.BukkitTask;
-
-import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.lang.reflect.Field;
 import java.util.Collections;
@@ -30,11 +28,9 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
     private static final String SERVERS_CHANNEL = "GetServers";
     private static final String PLAYERS_CHANNEL = "PlayerCount";
     private static final String CONFIG_INTERVAL = "check_interval";
-
     private static final Splitter SPLITTER = Splitter.on(",").trimResults();
 
-
-    private final Map<String, Integer>        counts = new HashMap<>();
+    private final Map<String, Integer> counts = new HashMap<>();
     private final AtomicReference<BukkitTask> cached = new AtomicReference<>();
 
     private static Field inputField;
@@ -68,11 +64,9 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
         return Collections.singletonMap(CONFIG_INTERVAL, 30);
     }
 
-
     @Override
     public String onRequest(final OfflinePlayer player, String identifier) {
         final int value;
-
         switch (identifier.toLowerCase()) {
             case "all":
             case "total":
@@ -82,23 +76,18 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
                 value = counts.getOrDefault(identifier.toLowerCase(), 0);
                 break;
         }
-
         return String.valueOf(value);
     }
 
     @Override
     public void start() {
-        final BukkitTask task = Bukkit.getScheduler().runTaskTimer(getPlaceholderAPI(), () -> {
-
+        final BukkitTask task = Bukkit.getScheduler().runTaskTimerAsynchronously(getPlaceholderAPI(), () -> {
             if (counts.isEmpty()) {
                 sendServersChannelMessage();
-            }
-            else {
+            } else {
                 counts.keySet().forEach(this::sendPlayersChannelMessage);
             }
-
-        }, 20L * 2L, 20L * getLong(CONFIG_INTERVAL, 30));
-
+        }, 40L, 20L * getLong(CONFIG_INTERVAL, 30));
 
         final BukkitTask prev = cached.getAndSet(task);
         if (prev != null) {
@@ -115,14 +104,11 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
         if (prev == null) {
             return;
         }
-
         prev.cancel();
         counts.clear();
-
         Bukkit.getMessenger().unregisterOutgoingPluginChannel(getPlaceholderAPI(), MESSAGE_CHANNEL);
         Bukkit.getMessenger().unregisterIncomingPluginChannel(getPlaceholderAPI(), MESSAGE_CHANNEL, this);
     }
-
 
     @Override
     public void onPluginMessageReceived(final String channel, final Player player, final byte[] message) {
@@ -130,18 +116,19 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
             return;
         }
 
-        //noinspection UnstableApiUsage
         final ByteArrayDataInput in = ByteStreams.newDataInput(message);
         try {
             DataInputStream stream = (DataInputStream) inputField.get(in);
             switch (in.readUTF()) {
-                    case PLAYERS_CHANNEL:
-                        if (stream.available() == 0) return; // how ?
-                        final String server = in.readUTF();
-                        if (stream.available() == 0) { // how ? x2
-                            getPlaceholderAPI().getLogger().log(Level.SEVERE, String.format("[%s] Could not get the player count from server %s.", getName(), server));
-                            counts.put(server.toLowerCase(), 0);
-                        } else counts.put(server.toLowerCase(), in.readInt());
+                case PLAYERS_CHANNEL:
+                    if (stream.available() == 0) return;
+                    final String server = in.readUTF();
+                    if (stream.available() == 0) {
+                        getPlaceholderAPI().getLogger().log(Level.SEVERE, String.format("[%s] Could not get the player count from server %s.", getName(), server));
+                        counts.put(server.toLowerCase(), 0);
+                    } else {
+                        counts.put(server.toLowerCase(), in.readInt());
+                    }
                     break;
                 case SERVERS_CHANNEL:
                     SPLITTER.split(in.readUTF()).forEach(serverName -> counts.putIfAbsent(serverName.toLowerCase(), 0));
@@ -152,9 +139,8 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
         }
     }
 
-
     private void sendServersChannelMessage() {
-        sendMessage(SERVERS_CHANNEL, out -> { });
+        sendMessage(SERVERS_CHANNEL, out -> {});
     }
 
     private void sendPlayersChannelMessage(final String serverName) {
@@ -163,17 +149,12 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
 
     private void sendMessage(final String channel, final Consumer<ByteArrayDataOutput> consumer) {
         final Player player = Iterables.getFirst(Bukkit.getOnlinePlayers(), null);
-        if (player == null) {
-            return;
-        }
+        if (player == null) return;
 
-        //noinspection UnstableApiUsage
         final ByteArrayDataOutput out = ByteStreams.newDataOutput();
         out.writeUTF(channel);
-
         consumer.accept(out);
 
-        player.sendPluginMessage(getPlaceholderAPI(), MESSAGE_CHANNEL, out.toByteArray());
+        Bukkit.getScheduler().runTask(getPlaceholderAPI(), () -> player.sendPluginMessage(getPlaceholderAPI(), MESSAGE_CHANNEL, out.toByteArray()));
     }
-
 }
